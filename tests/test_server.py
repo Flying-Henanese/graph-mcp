@@ -19,9 +19,9 @@ def test_get_codebase_skeleton_success(mock_skeleton, mock_scan, tmp_path):
     
     with patch("os.getcwd", return_value=str(tmp_path)):
         result = get_codebase_skeleton(".")
-        assert "### File: app.py ###" in result
+        assert "### File: app.py" in result
+        assert "GLOBAL_STRUCTURAL_HASH" in result
         assert "def main(): pass" in result
-
 def test_read_full_implementation_success(tmp_path):
     file1 = tmp_path / "logic.py"
     content = "class A:\n    pass"

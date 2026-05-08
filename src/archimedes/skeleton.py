@@ -43,6 +43,8 @@ class SkeletonTransformer(ast.NodeTransformer):
         self.generic_visit(node)
         return node
 
+import hashlib
+
 def get_structural_code(source_code: str) -> str:
     """
     Parses original code and returns a stripped skeleton version.
@@ -56,3 +58,9 @@ def get_structural_code(source_code: str) -> str:
         return "# [Error] Unable to parse syntax for this file."
     except Exception as e:
         return f"# [Error] Unexpected error during parsing: {str(e)}"
+
+def calculate_structural_hash(skeleton_code: str) -> str:
+    """
+    Calculates a SHA256 hash of the skeleton code to detect structural changes.
+    """
+    return hashlib.sha256(skeleton_code.encode("utf-8")).hexdigest()
