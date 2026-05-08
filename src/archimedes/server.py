@@ -5,9 +5,36 @@ import os
 import hashlib
 from archimedes.config import scan_files
 from archimedes.skeleton import get_structural_code, calculate_structural_hash
+from archimedes.graph import build_project_graph, graph_to_json
+import json
 
 # Initialize MCP Server
 mcp = FastMCP("Archimedes")
+
+@mcp.tool()
+def get_dependency_graph(target_dir: str = ".") -> str:
+    """
+    Returns the project's macro architecture as a JSON Dependency Graph.
+    Nodes represent modules (with their exported classes/functions).
+    Edges represent import dependencies between these modules.
+    
+    Use this to understand the high-level topology before reading skeletons.
+    """
+    base_path = Path(os.getcwd())
+    target_path = (base_path / target_dir).resolve()
+    
+    if not target_path.exists() or not target_path.is_dir():
+        return f"Error: Directory '{target_dir}' does not exist."
+
+    files = scan_files(str(target_path))
+    if not files:
+        return "No Python files found to build graph."
+        
+    graph = build_project_graph(files, target_path)
+    json_data = graph_to_json(graph)
+    
+    # Return as formatted JSON string
+    return json.dumps(json_data, indent=2)
 
 @mcp.tool()
 def check_cache_status(target_dir: str = ".") -> dict:

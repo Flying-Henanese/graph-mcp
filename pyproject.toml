@@ -9,6 +9,7 @@ dependencies = [
     "pathspec>=1.1.1",
     "pytest>=9.0.3",
     "pyyaml>=6.0.3",
+    "rustworkx>=0.17.1",
 ]
 
 [build-system]

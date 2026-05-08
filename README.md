@@ -1,5 +1,5 @@
 # Archimedes
-
+现在项目还特别蠢，只是把脱水过后的程序给出来，并没有关系一说，回来我要做一个牛逼的
 **Archimedes** is a minimalist, high-performance local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server designed to serve as "X-ray glasses" for Large Language Models (LLMs). 
 
 It allows LLMs to instantly grasp the architecture of large Python codebases by dynamically stripping away implementation details and returning only the "skeleton"—function signatures, class definitions, and docstrings.
