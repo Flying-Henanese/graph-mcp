@@ -1,9 +1,16 @@
-import pytest
-from unittest.mock import patch
 from pathlib import Path
-import os
-from archimedes.server import get_codebase_skeleton, read_full_implementation, check_cache_status, get_dependency_graph
+from unittest.mock import patch
+
+import pytest
+
+from archimedes.server import (
+    check_cache_status,
+    get_codebase_skeleton,
+    get_dependency_graph,
+    read_full_implementation,
+)
 from archimedes.state import state
+
 
 @pytest.fixture(autouse=True)
 def reset_state():
@@ -21,7 +28,7 @@ def test_get_codebase_skeleton_success(tmp_path):
     state.clear(tmp_path)
     file_path = tmp_path / "app.py"
     state.update_file(file_path, "def main(): pass", "hash123")
-    
+
     with state.lock:
         state.is_initialized = True
         expected_hash = state.global_hash
@@ -36,7 +43,7 @@ def test_check_cache_status_success(tmp_path):
     state.clear(tmp_path)
     file_path = tmp_path / "app.py"
     state.update_file(file_path, "def main(): pass", "hash123")
-    
+
     with state.lock:
         state.is_initialized = True
         expected_hash = state.global_hash
@@ -51,7 +58,7 @@ def test_read_full_implementation_success(tmp_path):
     file1 = tmp_path / "logic.py"
     content = "class A:\n    pass"
     file1.write_text(content)
-    
+
     with patch("os.getcwd", return_value=str(tmp_path)):
         result = read_full_implementation("logic.py")
         assert result == content

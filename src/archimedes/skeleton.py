@@ -10,48 +10,49 @@ provides high-level context to LLMs while drastically reducing token usage.
 import ast
 import hashlib
 
+
 class SkeletonTransformer(ast.NodeTransformer):
     """
     Traverses the Abstract Syntax Tree (AST) and modifies it in place.
     Specifically, it replaces the logic inside functions and asynchronous functions
     with a simple `pass` statement, while preserving top-level docstrings.
     """
-    
+
     def _strip_body(self, node: ast.AST) -> ast.AST:
         """
         Helper method to strip the body of a given AST node (like a function).
-        
+
         It preserves the first statement if it is a docstring, and retains any
         nested class or function definitions. Other executable statements are removed.
-        
+
         Args:
             node: The AST node whose body needs stripping.
-            
+
         Returns:
             The modified AST node.
         """
         if not node.body:
             return node
-            
+
         new_body = []
         # Check if the first statement is a docstring and preserve it
         first_stmt = node.body[0]
-        if (isinstance(first_stmt, ast.Expr) and 
-            isinstance(first_stmt.value, ast.Constant) and 
+        if (isinstance(first_stmt, ast.Expr) and
+            isinstance(first_stmt.value, ast.Constant) and
             isinstance(first_stmt.value.value, str)):
             new_body.append(first_stmt)
-            
+
         # Preserve nested definitions (e.g., inner classes or functions)
         # Note: generic_visit has already processed their internal bodies.
         for stmt in node.body:
             if isinstance(stmt, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
                 new_body.append(stmt)
-        
+
         # If the body is empty after stripping (or only has a docstring), add 'pass'
         # to ensure the resulting Python code remains syntactically valid.
         if not any(not isinstance(s, ast.Expr) for s in new_body):
             new_body.append(ast.Pass())
-            
+
         node.body = new_body
         return node
 
@@ -64,7 +65,7 @@ class SkeletonTransformer(ast.NodeTransformer):
         """Visits asynchronous function definitions."""
         self.generic_visit(node)
         return self._strip_body(node)
-    
+
     def visit_ClassDef(self, node: ast.ClassDef) -> ast.AST:
         """
         Visits class definitions. We keep the class definition intact but process
@@ -77,10 +78,10 @@ def get_structural_code(source_code: str) -> str:
     """
     Parses the raw original code into an AST, applies the SkeletonTransformer,
     and unparses it back into a string.
-    
+
     Args:
         source_code: The raw Python source code to process.
-        
+
     Returns:
         A string representing the stripped down "skeleton" of the code.
         Returns an error comment string if a SyntaxError or other exception occurs.
@@ -98,14 +99,14 @@ def get_structural_code(source_code: str) -> str:
 def calculate_structural_hash(skeleton_code: str) -> str:
     """
     Calculates a SHA256 hash of the generated skeleton code.
-    
+
     This is used to detect if the *structure* or *interface* of a file has changed.
     Changes that only affect the implementation logic (which is stripped out)
     will not change this hash.
-    
+
     Args:
         skeleton_code: The stripped structural code string.
-        
+
     Returns:
         The hexadecimal SHA256 hash string.
     """

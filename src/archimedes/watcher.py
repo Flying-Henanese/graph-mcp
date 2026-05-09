@@ -7,20 +7,20 @@ global `ProjectState` in real-time, ensuring that structural caches and hashes
 are always up-to-date without needing synchronous disk reads during client requests.
 """
 
-import time
 from pathlib import Path
-from typing import Any
-from watchdog.observers import Observer
-from watchdog.events import FileSystemEventHandler, FileSystemEvent
 
+from watchdog.events import FileSystemEvent, FileSystemEventHandler
+from watchdog.observers import Observer
+
+from archimedes.config import get_exclude_spec, is_file_tracked, scan_files
+from archimedes.skeleton import calculate_structural_hash, get_structural_code
 from archimedes.state import state
-from archimedes.skeleton import get_structural_code, calculate_structural_hash
-from archimedes.config import is_file_tracked, get_exclude_spec, scan_files
+
 
 class ArchimedesEventHandler(FileSystemEventHandler):
     """
     Handles file system events detected by the watchdog Observer.
-    
+
     It filters events based on the project's configuration (e.g., ignoring .git or venv)
     and updates the central `ProjectState` accordingly.
     """
@@ -32,14 +32,14 @@ class ArchimedesEventHandler(FileSystemEventHandler):
         """
         Reads a modified or newly created file, extracts its skeleton, calculates
         its structural hash, and updates the global state if changes are detected.
-        
+
         Args:
             file_path: Absolute path to the file that triggered the event.
         """
         # Fast exit if the file shouldn't be tracked (e.g., non-Python or excluded)
         if not is_file_tracked(file_path, self.base_path, self.exclude_spec):
             return
-            
+
         try:
             content = file_path.read_text(encoding="utf-8")
             skeleton = get_structural_code(content)
@@ -67,15 +67,15 @@ def initialize_state(target_dir: str = ".") -> None:
     """
     Performs an initial synchronous scan of the directory to populate the state
     before starting the background observer.
-    
+
     Args:
         target_dir: The root directory to monitor.
     """
     base_path = Path(target_dir).resolve()
     state.clear(base_path)
-    
+
     files = scan_files(str(base_path))
-    
+
     for file in files:
         try:
             content = file.read_text(encoding="utf-8")
@@ -84,22 +84,22 @@ def initialize_state(target_dir: str = ".") -> None:
             state.update_file(file, skeleton, file_hash)
         except Exception as e:
             state.set_file_error(file, f"# [Error] {str(e)}")
-            
+
     with state.lock:
         state.is_initialized = True
 
 def start_watcher(target_dir: str = ".") -> Observer:
     """
     Initializes the in-memory state and starts the watchdog observer in a background thread.
-    
+
     Args:
         target_dir: The root directory to monitor.
-        
+
     Returns:
         The running `watchdog.observers.Observer` instance.
     """
     initialize_state(target_dir)
-    
+
     base_path = Path(target_dir).resolve()
     event_handler = ArchimedesEventHandler(base_path)
     observer = Observer()

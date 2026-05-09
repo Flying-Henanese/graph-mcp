@@ -1,5 +1,5 @@
-import pytest
 from archimedes.skeleton import get_structural_code
+
 
 def test_basic_function_stripping():
     code = """
@@ -42,7 +42,7 @@ class MyService:
     \"\"\"Service class.\"\"\"
     def __init__(self, db):
         self.db = db
-        
+
     async def get_user(self, user_id):
         return await self.db.find(user_id)
 """
