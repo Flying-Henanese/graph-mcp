@@ -85,6 +85,7 @@ def is_file_tracked(
         exclude_spec = get_exclude_spec()
 
     try:
+        # Calculate the relative path to the file from the base path
         rel_path = str(file_path.relative_to(base_path))
         # Ensure path uses forward slashes for cross-platform pathspec matching
         rel_path = rel_path.replace('\\', '/')

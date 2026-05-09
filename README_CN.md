@@ -112,6 +112,7 @@ uv run pytest
 ## 🗺 路线图
 
 -   **V2.1**：高级边解析（将导入匹配到具体的函数/类）。
+-   **多语言支持 (V3)**：通过抽象解析层，实现对 Python 以外语言（如 TypeScript, Go, Java）的支持。
 -   **Gemini 上下文缓存**：原生集成 `cachedContents` API 以实现零 Token 项目加载。
 -   **交互式可视化**：用于浏览依赖图的轻量级 Web 界面。
 

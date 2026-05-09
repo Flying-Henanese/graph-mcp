@@ -16,7 +16,25 @@ class SkeletonTransformer(ast.NodeTransformer):
     Traverses the Abstract Syntax Tree (AST) and modifies it in place.
     Specifically, it replaces the logic inside functions and asynchronous functions
     with a simple `pass` statement, while preserving top-level docstrings.
+    It also injects line range information using a virtual @line(start, end) decorator.
     """
+
+    def _inject_line_decorator(self, node: ast.AST) -> None:
+        """Injects a virtual @line(start, end) decorator into class and function definitions."""
+        if (hasattr(node, "lineno") and
+            hasattr(node, "end_lineno") and
+            hasattr(node, "decorator_list")):
+            # Construct: @line(start_line, end_line)
+            line_decorator = ast.Call(
+                func=ast.Name(id="line", ctx=ast.Load()),
+                args=[
+                    ast.Constant(value=node.lineno),
+                    ast.Constant(value=node.end_lineno)
+                ],
+                keywords=[]
+            )
+            # Insert at the beginning of the decorator list
+            node.decorator_list.insert(0, line_decorator)
 
     def _strip_body(self, node: ast.AST) -> ast.AST:
         """
@@ -58,11 +76,13 @@ class SkeletonTransformer(ast.NodeTransformer):
 
     def visit_FunctionDef(self, node: ast.FunctionDef) -> ast.AST:
         """Visits standard synchronous function definitions."""
+        self._inject_line_decorator(node)
         self.generic_visit(node)
         return self._strip_body(node)
 
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> ast.AST:
         """Visits asynchronous function definitions."""
+        self._inject_line_decorator(node)
         self.generic_visit(node)
         return self._strip_body(node)
 
@@ -71,6 +91,7 @@ class SkeletonTransformer(ast.NodeTransformer):
         Visits class definitions. We keep the class definition intact but process
         its body (methods) to ensure they are stripped.
         """
+        self._inject_line_decorator(node)
         self.generic_visit(node)
         return node
 

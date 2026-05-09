@@ -112,6 +112,7 @@ uv run pytest
 ## 🗺 Roadmap
 
 -   **V2.1**: Advanced edge resolution (matching imports to specific functions/classes).
+-   **Multi-language Support (V3)**: Abstract the parser layer to support languages beyond Python (e.g., TypeScript, Go, Java) using language-specific AST visitors.
 -   **Gemini Context Caching**: Native integration with `cachedContents` API to achieve zero-token project loads.
 -   **Interactive Visualizer**: A lightweight web UI to browse the dependency graph.
 
