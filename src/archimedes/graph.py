@@ -88,13 +88,13 @@ class DependencyVisitor(ast.NodeVisitor):
         """
         self.exports.append(ExportEntity(name=node.name, kind="function", line_no=node.lineno))
         self.generic_visit(node)
-    
+
     # override visit_AsyncFunctionDef to capture async function definitions
     def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Captures asynchronous function definitions."""
         self.exports.append(ExportEntity(name=node.name, kind="function", line_no=node.lineno))
         self.generic_visit(node)
-    
+
     # override visit_Assign to capture top-level constants and variables
     def visit_Assign(self, node: ast.Assign) -> None:
         """Attempt to capture top-level constants and variables."""
@@ -104,7 +104,7 @@ class DependencyVisitor(ast.NodeVisitor):
                     ExportEntity(name=target.id, kind="variable", line_no=node.lineno)
                 )
         self.generic_visit(node)
-    
+
     # override visit_Import to capture absolute module imports
     def visit_Import(self, node: ast.Import) -> None:
         """Captures absolute module imports (e.g., `import os`)."""
@@ -114,7 +114,7 @@ class DependencyVisitor(ast.NodeVisitor):
                 ImportInteraction(module=alias.name, entities=[], line_no=node.lineno)
             )
         self.generic_visit(node)
-    
+
     # override visit_ImportFrom to capture specific entity imports from a module
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Captures specific entity imports from a module (e.g., `from os import path`)."""
@@ -226,7 +226,7 @@ def graph_to_json(graph: rx.PyDiGraph) -> Dict[str, Any]:
     for idx in graph.node_indices():
         current_node: ModuleNode = graph[idx]
 
-        # Aggregation Phase: Group atomic ExportEntity objects back into 
+        # Aggregation Phase: Group atomic ExportEntity objects back into
         # categories for LLM consumption
         # This keeps the output compact while the internal data remains rich and atomic.
         raw_exports: List[ExportEntity] = current_node.exports
@@ -238,7 +238,8 @@ def graph_to_json(graph: rx.PyDiGraph) -> Dict[str, Any]:
 
         for entity in raw_exports:
             entity: ExportEntity
-            # Map kind to the correct list (kind "class" -> "classes", "function" -> "functions", etc.)
+            # Map kind to the correct list
+            # (kind "class" -> "classes", "function" -> "functions", etc.)
             if entity.kind == "class":
                 key = "classes"
             elif entity.kind == "function":
@@ -261,7 +262,7 @@ def graph_to_json(graph: rx.PyDiGraph) -> Dict[str, Any]:
     for edge_idx in graph.edge_indices():
         source_idx, target_idx = graph.get_edge_endpoints_by_index(edge_idx)
         edge_data: DependencyEdge = graph.get_edge_data_by_index(edge_idx)
-        
+
         edges.append({
             "source": graph[source_idx].id,
             "target": graph[target_idx].id,
