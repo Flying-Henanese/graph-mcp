@@ -20,20 +20,20 @@ class DependencyVisitor(ast.NodeVisitor):
     and module dependencies (imports). This data is later used as node and edge
     attributes in the rustworkx graph.
     """
-    def __init__(self):
+    def __init__(self) -> None:
         # A dictionary holding lists of exported symbols from the current file
-        self.exports = {"classes": [], "functions": [], "variables": []}
+        self.exports: Dict[str, List[str]] = {"classes": [], "functions": [], "variables": []}
         
         # A list of tuples representing outgoing dependencies:
         # (module_name, list_of_imported_names, line_number)
-        self.imports = []
+        self.imports: List[Tuple[str, List[str], int]] = []
 
-    def visit_ClassDef(self, node: ast.ClassDef):
+    def visit_ClassDef(self, node: ast.ClassDef) -> None:
         """Captures class definitions as exported entities."""
         self.exports["classes"].append(node.name)
         self.generic_visit(node)
 
-    def visit_FunctionDef(self, node: ast.FunctionDef):
+    def visit_FunctionDef(self, node: ast.FunctionDef) -> None:
         """
         Captures standard function definitions.
         Note: For this MVP, we capture all functions encountered. Ideally,
@@ -42,26 +42,26 @@ class DependencyVisitor(ast.NodeVisitor):
         self.exports["functions"].append(node.name)
         self.generic_visit(node)
 
-    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef) -> None:
         """Captures asynchronous function definitions."""
         self.exports["functions"].append(node.name)
         self.generic_visit(node)
 
-    def visit_Assign(self, node: ast.Assign):
+    def visit_Assign(self, node: ast.Assign) -> None:
         """Attempt to capture top-level constants and variables."""
         for target in node.targets:
             if isinstance(target, ast.Name):
                 self.exports["variables"].append(target.id)
         self.generic_visit(node)
 
-    def visit_Import(self, node: ast.Import):
+    def visit_Import(self, node: ast.Import) -> None:
         """Captures absolute module imports (e.g., `import os`)."""
         for alias in node.names:
             # We don't know the exact names being used yet, just the module
             self.imports.append((alias.name, [], node.lineno))
         self.generic_visit(node)
 
-    def visit_ImportFrom(self, node: ast.ImportFrom):
+    def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Captures specific entity imports from a module (e.g., `from os import path`)."""
         if node.module:
             names = [alias.name for alias in node.names]

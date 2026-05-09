@@ -62,8 +62,8 @@ def test_watcher_file_modification(temp_workspace):
     
     try:
         # Reset dirty flag to simulate clean state after initial graph load
+        state.update_graph("{}")
         with state.lock:
-            state.graph_needs_rebuild = False
             initial_global_hash = state.global_hash
             main_file = Path("src/main.py").resolve()
             initial_file_hash = state.file_hashes[main_file]
@@ -90,9 +90,9 @@ def test_watcher_file_addition(temp_workspace):
     observer = start_watcher(".")
     
     try:
+        state.update_graph("{}")
         with state.lock:
             initial_count = len(state.file_hashes)
-            state.graph_needs_rebuild = False
             
         # Add new file
         new_file_path = temp_workspace / "src" / "utils.py"
@@ -116,10 +116,10 @@ def test_watcher_file_deletion(temp_workspace):
     observer = start_watcher(".")
     
     try:
+        state.update_graph("{}")
         with state.lock:
             main_file = Path("src/main.py").resolve()
             assert main_file in state.file_hashes
-            state.graph_needs_rebuild = False
             
         # Delete file
         main_file_path = temp_workspace / "src" / "main.py"

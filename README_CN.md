@@ -97,11 +97,15 @@ indexing:
 uv run python -m archimedes.server
 ```
 
-## 🧪 测试
+## 🧪 测试与代码规范
 
-我们维护了完善的测试套件，涵盖 AST 转换、配置解析、图构建和服务器逻辑。
+我们维护了完善的测试套件（涵盖 AST 转换、配置解析、图构建和服务器逻辑），并使用 `ruff` 强制执行严格的代码风格。
 
 ```bash
+# 运行代码风格检查
+uv run ruff check .
+
+# 运行测试套件
 uv run pytest
 ```
 

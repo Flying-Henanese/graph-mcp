@@ -11,6 +11,9 @@ from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 import os
 import json
+from typing import Dict, Any, Optional
+
+from watchdog.observers.api import BaseObserver
 
 from archimedes.state import state
 from archimedes.watcher import start_watcher
@@ -20,7 +23,7 @@ from archimedes.graph import build_project_graph, graph_to_json
 mcp = FastMCP("Archimedes")
 
 # Global reference to observer to keep the background thread alive
-_observer = None
+_observer: Optional[BaseObserver] = None
 
 @mcp.tool()
 def get_dependency_graph() -> str:
@@ -37,21 +40,28 @@ def get_dependency_graph() -> str:
     if not state.is_initialized:
         return "Error: Server state is not yet initialized."
 
+    # Using state.lock to ensure atomic read/check of graph status
     with state.lock:
-        if state.graph_needs_rebuild:
-            # Rebuild graph from cached files instead of hitting the disk again
+        needs_rebuild = state.graph_needs_rebuild
+        cached_json = state.cached_graph_json
+        
+    if needs_rebuild:
+        # Rebuild graph from cached files instead of hitting the disk again
+        with state.lock:
             files = list(state.file_hashes.keys())
-            if not files:
-                return "No Python files found to build graph."
-                
-            graph = build_project_graph(files, state.base_path)
-            state.cached_graph_json = json.dumps(graph_to_json(graph), indent=2)
-            state.graph_needs_rebuild = False
             
-        return state.cached_graph_json
+        if not files:
+            return "No Python files found to build graph."
+            
+        graph = build_project_graph(files, state.base_path)
+        new_json = json.dumps(graph_to_json(graph), indent=2)
+        state.update_graph(new_json)
+        return new_json
+        
+    return cached_json
 
 @mcp.tool()
-def check_cache_status() -> dict:
+def check_cache_status() -> Dict[str, Any]:
     """
     Returns the current global structural hash of the codebase.
     
@@ -128,7 +138,7 @@ def read_full_implementation(file_path: str) -> str:
     except Exception as e:
         return f"Error reading file '{file_path}': {str(e)}"
 
-def main():
+def main() -> None:
     """
     Entry point for the application. Starts the background watcher and then
     launches the FastMCP server blocking loop.

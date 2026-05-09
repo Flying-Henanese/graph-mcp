@@ -9,8 +9,9 @@ which files should be included or excluded from the MCP server's analysis. It us
 import yaml
 from pathlib import Path
 import pathspec
+from typing import Dict, List, Any, Optional
 
-def load_config(config_path: str = "archimedes.yaml") -> dict:
+def load_config(config_path: str = "archimedes.yaml") -> Dict[str, Any]:
     """
     Loads the indexing configuration from the specified YAML file.
     
@@ -24,7 +25,7 @@ def load_config(config_path: str = "archimedes.yaml") -> dict:
     Returns:
         A dictionary containing the 'indexing' configuration block.
     """
-    default_config = {
+    default_config: Dict[str, List[str]] = {
         "include": ["src/**/*.py"],
         "exclude": ["tests/**", "**/__pycache__/**", "venv/**", ".git/**", ".venv/**"]
     }
@@ -50,13 +51,13 @@ def get_exclude_spec(config_path: str = "archimedes.yaml") -> pathspec.PathSpec:
     Returns:
         A compiled `pathspec.PathSpec` object ready for file matching.
     """
-    config = load_config(config_path)
+    config: Dict[str, Any] = load_config(config_path)
     return pathspec.PathSpec.from_lines(
         'gitignore', 
         config.get("exclude", [])
     )
 
-def is_file_tracked(file_path: Path, base_path: Path, exclude_spec: pathspec.PathSpec = None) -> bool:
+def is_file_tracked(file_path: Path, base_path: Path, exclude_spec: Optional[pathspec.PathSpec] = None) -> bool:
     """
     Determines whether a specific file should be tracked and processed by Archimedes.
     
@@ -87,7 +88,7 @@ def is_file_tracked(file_path: Path, base_path: Path, exclude_spec: pathspec.Pat
         
     return not exclude_spec.match_file(rel_path)
 
-def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> list[Path]:
+def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> List[Path]:
     """
     Performs a full directory scan to find all tracked Python files.
     
@@ -119,3 +120,4 @@ def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> list[Pa
             valid_files.append(file_path)
             
     return sorted(valid_files)
+

@@ -97,11 +97,15 @@ To start the MCP server over standard input/output (stdio):
 uv run python -m archimedes.server
 ```
 
-## 🧪 Testing
+## 🧪 Testing & Linting
 
-We maintain a robust test suite covering AST transformation, configuration parsing, graph building, and server logic.
+We maintain a robust test suite covering AST transformation, configuration parsing, graph building, and server logic, alongside strict code style checking with `ruff`.
 
 ```bash
+# Run the linter
+uv run ruff check .
+
+# Run the test suite
 uv run pytest
 ```
 

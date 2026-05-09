@@ -28,6 +28,7 @@ archimedes/
 ```
 
 ## 4. Mandatory Development Rules
+- **Strict Type Hinting**: All function signatures (including return types), class attributes, and complex variables MUST have explicit and strict Python type hints. Use the `typing` module (`Dict`, `List`, `Optional`, `Any`, etc.) extensively to ensure static analysis safety and code readability.
 - **AST Integrity**: When extracting skeletons, *always* replace the body of `FunctionDef` and `AsyncFunctionDef` with `pass`. Ensure docstrings are preserved if they provide interface clarity.
 - **Zero-Dependency V1**: Do not introduce databases, caching layers, or external state management in the MVP.
 - **Path Safety**: All file operations must be scoped within the user-provided `target_dir` and respect `archimedes.yaml` filters.

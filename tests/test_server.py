@@ -8,14 +8,7 @@ from archimedes.state import state
 @pytest.fixture(autouse=True)
 def reset_state():
     """Reset the global state before each test."""
-    with state.lock:
-        state.is_initialized = False
-        state.file_hashes.clear()
-        state.file_skeletons.clear()
-        state.global_hash = ""
-        state.cached_graph_json = ""
-        state.graph_needs_rebuild = True
-        state.base_path = Path(".")
+    state.clear(Path("."))
 
 def test_uninitialized_state():
     """Test that endpoints return errors when state is not initialized."""
@@ -25,30 +18,31 @@ def test_uninitialized_state():
 
 def test_get_codebase_skeleton_success(tmp_path):
     """Test getting codebase skeleton from populated state."""
+    state.clear(tmp_path)
+    file_path = tmp_path / "app.py"
+    state.update_file(file_path, "def main(): pass", "hash123")
+    
     with state.lock:
         state.is_initialized = True
-        state.base_path = tmp_path
-        file_path = tmp_path / "app.py"
-        state.file_skeletons[file_path] = "def main(): pass"
-        state.file_hashes[file_path] = "hash123"
-        state.global_hash = "global_hash_456"
+        expected_hash = state.global_hash
 
     result = get_codebase_skeleton()
     assert "### File: app.py (Hash: hash123) ###" in result
-    assert "GLOBAL_STRUCTURAL_HASH: global_hash_456" in result
+    assert f"GLOBAL_STRUCTURAL_HASH: {expected_hash}" in result
     assert "def main(): pass" in result
 
 def test_check_cache_status_success(tmp_path):
     """Test cache status reads from state correctly."""
+    state.clear(tmp_path)
+    file_path = tmp_path / "app.py"
+    state.update_file(file_path, "def main(): pass", "hash123")
+    
     with state.lock:
         state.is_initialized = True
-        state.base_path = tmp_path
-        file_path = tmp_path / "app.py"
-        state.file_hashes[file_path] = "hash123"
-        state.global_hash = "global_hash_456"
+        expected_hash = state.global_hash
 
     result = check_cache_status()
-    assert result["global_structural_hash"] == "global_hash_456"
+    assert result["global_structural_hash"] == expected_hash
     assert result["file_count"] == 1
     assert result["status"] == "ready"
 
