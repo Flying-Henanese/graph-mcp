@@ -1,10 +1,28 @@
+"""
+Configuration and File Scanning Module.
+
+This module handles reading the `archimedes.yaml` configuration file to determine
+which files should be included or excluded from the MCP server's analysis. It uses
+`pathspec` to process gitignore-style matching rules.
+"""
+
 import yaml
 from pathlib import Path
 import pathspec
 
 def load_config(config_path: str = "archimedes.yaml") -> dict:
     """
-    Loads indexing configuration from archimedes.yaml.
+    Loads the indexing configuration from the specified YAML file.
+    
+    If the file does not exist or fails to parse, a default configuration is returned
+    which includes all Python files in `src/` and excludes common virtual environments
+    and cache directories.
+    
+    Args:
+        config_path: The relative or absolute path to the configuration file.
+        
+    Returns:
+        A dictionary containing the 'indexing' configuration block.
     """
     default_config = {
         "include": ["src/**/*.py"],
@@ -24,7 +42,13 @@ def load_config(config_path: str = "archimedes.yaml") -> dict:
 
 def get_exclude_spec(config_path: str = "archimedes.yaml") -> pathspec.PathSpec:
     """
-    Returns a compiled pathspec based on the exclude configuration.
+    Reads the configuration and compiles a pathspec matcher for the exclude patterns.
+    
+    Args:
+        config_path: The path to the configuration file.
+        
+    Returns:
+        A compiled `pathspec.PathSpec` object ready for file matching.
     """
     config = load_config(config_path)
     return pathspec.PathSpec.from_lines(
@@ -34,7 +58,18 @@ def get_exclude_spec(config_path: str = "archimedes.yaml") -> pathspec.PathSpec:
 
 def is_file_tracked(file_path: Path, base_path: Path, exclude_spec: pathspec.PathSpec = None) -> bool:
     """
-    Checks if a given Python file should be tracked based on configuration.
+    Determines whether a specific file should be tracked and processed by Archimedes.
+    
+    A file is tracked if it is a Python file (`.py`) and its relative path does not
+    match any of the exclude patterns defined in the configuration.
+    
+    Args:
+        file_path: The absolute path of the file to check.
+        base_path: The root project directory, used to calculate the relative path.
+        exclude_spec: An optional pre-compiled pathspec matcher. If not provided, it will be loaded.
+        
+    Returns:
+        True if the file should be tracked, False otherwise.
     """
     if file_path.suffix != ".py":
         return False
@@ -44,16 +79,27 @@ def is_file_tracked(file_path: Path, base_path: Path, exclude_spec: pathspec.Pat
         
     try:
         rel_path = str(file_path.relative_to(base_path))
-        # Ensure path uses forward slashes for matching
+        # Ensure path uses forward slashes for cross-platform pathspec matching
         rel_path = rel_path.replace('\\', '/')
     except ValueError:
+        # File is not under the base path
         return False
         
     return not exclude_spec.match_file(rel_path)
 
 def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> list[Path]:
     """
-    Scans the target directory for Python files, respecting include/exclude patterns.
+    Performs a full directory scan to find all tracked Python files.
+    
+    This function walks the directory tree recursively and filters files based on
+    the `is_file_tracked` rules.
+    
+    Args:
+        target_dir: The root directory to scan.
+        config_path: The path to the configuration file.
+        
+    Returns:
+        A sorted list of `Path` objects representing the tracked Python files.
     """
     base_path = Path(target_dir).resolve()
     
@@ -61,6 +107,10 @@ def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> list[Pa
         return []
 
     exclude_spec = get_exclude_spec(config_path)
+    
+    # Using rglob to find all python files.
+    # Note: For V1, the 'include' config is simplified to assume we want all .py files,
+    # and we rely primarily on 'exclude' rules to filter unwanted ones.
     all_py_files = list(base_path.rglob("*.py"))
     valid_files = []
     

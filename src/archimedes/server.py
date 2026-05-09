@@ -1,3 +1,12 @@
+"""
+MCP Server Entry Point.
+
+This module defines the Archimedes MCP Server using the FastMCP framework.
+It exposes tools for LLMs to query the codebase skeleton, dependency graph,
+and specific file implementations. It relies heavily on the `watchdog`-backed
+in-memory `ProjectState` to provide O(1) responses.
+"""
+
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 import os
@@ -7,27 +16,30 @@ from archimedes.state import state
 from archimedes.watcher import start_watcher
 from archimedes.graph import build_project_graph, graph_to_json
 
-# Initialize MCP Server
+# Initialize MCP Server instance
 mcp = FastMCP("Archimedes")
 
-# Global reference to observer to keep it alive
+# Global reference to observer to keep the background thread alive
 _observer = None
 
 @mcp.tool()
 def get_dependency_graph() -> str:
     """
     Returns the project's macro architecture as a JSON Dependency Graph.
+    
     Nodes represent modules (with their exported classes/functions).
     Edges represent import dependencies between these modules.
     
-    Use this to understand the high-level topology before reading skeletons.
+    This tool utilizes a lazy-loading strategy: it only rebuilds the graph
+    using rustworkx if the codebase structure has changed since the last call.
+    Otherwise, it returns the cached JSON string in O(1) time.
     """
     if not state.is_initialized:
         return "Error: Server state is not yet initialized."
 
     with state.lock:
         if state.graph_needs_rebuild:
-            # Rebuild graph from cached files instead of disk
+            # Rebuild graph from cached files instead of hitting the disk again
             files = list(state.file_hashes.keys())
             if not files:
                 return "No Python files found to build graph."
@@ -41,11 +53,13 @@ def get_dependency_graph() -> str:
 @mcp.tool()
 def check_cache_status() -> dict:
     """
-    Returns the current global structural hash of the codebase to check if the client cache is valid.
-    Reads directly from memory (O(1)), no disk scanning involved.
+    Returns the current global structural hash of the codebase.
+    
+    Clients can use this tool to quickly verify if their locally cached codebase
+    skeleton is still valid. Reads directly from memory in O(1) time.
     
     Returns:
-        A dictionary containing the global_hash and file_count.
+        A dictionary containing the global_structural_hash and file_count.
     """
     if not state.is_initialized:
         return {"error": "Server state is not yet initialized."}
@@ -60,8 +74,11 @@ def check_cache_status() -> dict:
 @mcp.tool()
 def get_codebase_skeleton() -> str:
     """
-    Returns the skeleton/interfaces of all tracked Python files directly from memory.
-    Includes a 'Global-Hash' header for client-side caching.
+    Returns the structural interfaces (skeleton) of all tracked Python files.
+    
+    Served directly from the actively monitored in-memory state in O(1) time,
+    eliminating the need for synchronous disk reads or AST parsing during the request.
+    Includes a 'GLOBAL_STRUCTURAL_HASH' header for client-side caching mechanisms.
     """
     if not state.is_initialized:
         return "Error: Server state is not yet initialized."
@@ -72,6 +89,7 @@ def get_codebase_skeleton() -> str:
         if not state.file_skeletons:
             return "No Python files found after applying filters."
             
+        # Sort paths to ensure consistent output ordering for stable hashing
         for file_path, skeleton in sorted(state.file_skeletons.items()):
             rel_display_path = file_path.relative_to(state.base_path)
             h = state.file_hashes.get(file_path, "Error")
@@ -91,8 +109,10 @@ def get_codebase_skeleton() -> str:
 @mcp.tool()
 def read_full_implementation(file_path: str) -> str:
     """
-    Reads the full source code of a specific file from disk.
-    Use this after identifying a relevant file via 'get_codebase_skeleton'.
+    Reads the full, unstripped source code of a specific file directly from disk.
+    
+    This is intended to be used for deep-dives *after* the LLM has identified
+    a relevant file using the skeleton or dependency graph.
     
     Args:
         file_path: The relative path to the file to read.
@@ -109,12 +129,17 @@ def read_full_implementation(file_path: str) -> str:
         return f"Error reading file '{file_path}': {str(e)}"
 
 def main():
+    """
+    Entry point for the application. Starts the background watcher and then
+    launches the FastMCP server blocking loop.
+    """
     global _observer
     # Start the watchdog observer on the current working directory before running MCP
     _observer = start_watcher(".")
     try:
         mcp.run()
     finally:
+        # Ensure clean shutdown of the background thread
         if _observer:
             _observer.stop()
             _observer.join()

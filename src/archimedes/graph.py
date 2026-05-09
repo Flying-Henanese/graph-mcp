@@ -1,3 +1,12 @@
+"""
+Dependency Graph Construction Module.
+
+This module is responsible for analyzing the AST of Python files to extract
+exported symbols (classes, functions) and import statements. It then uses the
+`rustworkx` library to build a directed acyclic graph (DAG) representing the
+macro-level topology of the codebase.
+"""
+
 import ast
 import rustworkx as rx
 from pathlib import Path
@@ -5,41 +14,55 @@ from typing import Dict, Any, Tuple, List
 
 class DependencyVisitor(ast.NodeVisitor):
     """
-    Visits an AST to extract exports (classes, functions, variables)
-    and imports (edges) for graph construction.
+    AST Visitor that extracts structural metadata for graph construction.
+    
+    It captures exported entities (classes, top-level functions, top-level variables)
+    and module dependencies (imports). This data is later used as node and edge
+    attributes in the rustworkx graph.
     """
     def __init__(self):
+        # A dictionary holding lists of exported symbols from the current file
         self.exports = {"classes": [], "functions": [], "variables": []}
-        self.imports = []  # List of (module_name, imported_names, line_no)
+        
+        # A list of tuples representing outgoing dependencies:
+        # (module_name, list_of_imported_names, line_number)
+        self.imports = []
 
-    def visit_ClassDef(self, node):
+    def visit_ClassDef(self, node: ast.ClassDef):
+        """Captures class definitions as exported entities."""
         self.exports["classes"].append(node.name)
         self.generic_visit(node)
 
-    def visit_FunctionDef(self, node):
-        # Only capture top-level functions (ignoring methods for now to keep exports clean)
-        # But generic_visit will traverse inside classes, so we might get methods too.
-        # For MVP, capturing all is fine, but ideally we'd filter. Let's capture all for now.
+    def visit_FunctionDef(self, node: ast.FunctionDef):
+        """
+        Captures standard function definitions.
+        Note: For this MVP, we capture all functions encountered. Ideally,
+        we would filter out class methods if we only wanted top-level exports.
+        """
         self.exports["functions"].append(node.name)
         self.generic_visit(node)
 
-    def visit_AsyncFunctionDef(self, node):
+    def visit_AsyncFunctionDef(self, node: ast.AsyncFunctionDef):
+        """Captures asynchronous function definitions."""
         self.exports["functions"].append(node.name)
         self.generic_visit(node)
 
-    def visit_Assign(self, node):
-        # Attempt to capture top-level constants
+    def visit_Assign(self, node: ast.Assign):
+        """Attempt to capture top-level constants and variables."""
         for target in node.targets:
             if isinstance(target, ast.Name):
                 self.exports["variables"].append(target.id)
         self.generic_visit(node)
 
-    def visit_Import(self, node):
+    def visit_Import(self, node: ast.Import):
+        """Captures absolute module imports (e.g., `import os`)."""
         for alias in node.names:
+            # We don't know the exact names being used yet, just the module
             self.imports.append((alias.name, [], node.lineno))
         self.generic_visit(node)
 
-    def visit_ImportFrom(self, node):
+    def visit_ImportFrom(self, node: ast.ImportFrom):
+        """Captures specific entity imports from a module (e.g., `from os import path`)."""
         if node.module:
             names = [alias.name for alias in node.names]
             self.imports.append((node.module, names, node.lineno))
@@ -47,19 +70,32 @@ class DependencyVisitor(ast.NodeVisitor):
 
 def build_project_graph(files: List[Path], base_path: Path) -> rx.PyDiGraph:
     """
-    Builds a rustworkx DAG representing the project modules and their dependencies.
+    Builds a directed graph representing the project modules and their dependencies.
+    
+    It operates in two passes:
+    1. Node Creation: Parses all files to extract exports and raw imports, adding them as nodes.
+    2. Edge Resolution: Connects nodes based on import statements, attempting to resolve
+       target module names to local graph nodes.
+       
+    Args:
+        files: A list of Paths to the Python files to include in the graph.
+        base_path: The root project directory, used to calculate module namespaces.
+        
+    Returns:
+        A `rustworkx.PyDiGraph` instance.
     """
     graph = rx.PyDiGraph()
+    # Mapping from Python module namespace (e.g., 'src.utils.math') to the rustworkx node index
     module_to_node_idx = {}
     
-    # Pre-compute module names for all files
+    # --- Pass 1: Pre-compute module names and create nodes ---
     for file_path in files:
         try:
             rel_path = file_path.relative_to(base_path)
-            # e.g., src/engine/parser.py -> src.engine.parser
+            # Convert file path to Python module notation (e.g., src/engine/parser.py -> src.engine.parser)
             module_name = str(rel_path.with_suffix("")).replace("/", ".").replace("\\", ".")
             
-            # Extract metadata via AST
+            # Extract metadata via AST Visitor
             content = file_path.read_text(encoding="utf-8")
             tree = ast.parse(content)
             visitor = DependencyVisitor()
@@ -70,30 +106,28 @@ def build_project_graph(files: List[Path], base_path: Path) -> rx.PyDiGraph:
                 "type": "module",
                 "file_path": str(rel_path),
                 "exports": visitor.exports,
-                "raw_imports": visitor.imports # Keep for edge resolution
+                "raw_imports": visitor.imports # Kept temporarily for Pass 2 edge resolution
             }
             
             idx = graph.add_node(node_data)
             module_to_node_idx[module_name] = idx
         except Exception as e:
-            # Skip unparseable files or those outside base_path
+            # Skip unparseable files or those unexpectedly outside base_path
             continue
 
-    # Add Edges based on imports
+    # --- Pass 2: Add Edges based on resolved imports ---
     for node_idx in graph.node_indices():
         node_data = graph[node_idx]
         source_module = node_data["id"]
         
+        # Iterate over the raw imports captured in Pass 1
         for imported_module, imported_names, line_no in node_data.get("raw_imports", []):
             # Attempt to match imported_module to our known local modules
-            # E.g., if target is 'src.engine.base', does it exist in module_to_node_idx?
-            # Note: This is a best-effort static resolution.
-            
-            # Exact match
+            # Note: This is a best-effort static resolution. Dynamic imports or complex
+            # relative imports might be missed in this MVP version.
             target_idx = module_to_node_idx.get(imported_module)
             
-            # If not found, it might be a relative import or external package.
-            # For this MVP, we only create edges for explicitly known local modules.
+            # If a local target is found (and it's not a self-import), create an edge
             if target_idx is not None and target_idx != node_idx:
                 edge_data = {
                     "dependency_type": "import",
@@ -104,19 +138,24 @@ def build_project_graph(files: List[Path], base_path: Path) -> rx.PyDiGraph:
                         "line_no": line_no
                     }]
                 }
-                # To prevent multiple edges between same nodes, check if edge exists
-                # rustworkx allows multi-edges, so we just add them. 
-                # Later we can condense them if needed.
+                # Add the directed edge. Rustworkx allows multi-edges, so we don't strictly
+                # need to check for pre-existing edges here unless we want to consolidate them.
                 graph.add_edge(node_idx, target_idx, edge_data)
                 
-        # Clean up raw_imports from node data as it's no longer needed for final output
+        # Clean up raw_imports from node data as it's no longer needed for the final output
         node_data.pop("raw_imports", None)
 
     return graph
 
 def graph_to_json(graph: rx.PyDiGraph) -> Dict[str, Any]:
     """
-    Serializes the rustworkx graph to a dictionary for JSON output.
+    Serializes the rustworkx PyDiGraph into a standard JSON-compatible dictionary.
+    
+    Args:
+        graph: The constructed dependency graph.
+        
+    Returns:
+        A dictionary with 'nodes' and 'edges' arrays, suitable for JSON serialization.
     """
     nodes = [graph[idx] for idx in graph.node_indices()]
     edges = []
