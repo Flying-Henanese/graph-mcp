@@ -22,39 +22,50 @@ def load_config(config_path: str = "archimedes.yaml") -> dict:
     except Exception:
         return default_config
 
+def get_exclude_spec(config_path: str = "archimedes.yaml") -> pathspec.PathSpec:
+    """
+    Returns a compiled pathspec based on the exclude configuration.
+    """
+    config = load_config(config_path)
+    return pathspec.PathSpec.from_lines(
+        'gitignore', 
+        config.get("exclude", [])
+    )
+
+def is_file_tracked(file_path: Path, base_path: Path, exclude_spec: pathspec.PathSpec = None) -> bool:
+    """
+    Checks if a given Python file should be tracked based on configuration.
+    """
+    if file_path.suffix != ".py":
+        return False
+        
+    if exclude_spec is None:
+        exclude_spec = get_exclude_spec()
+        
+    try:
+        rel_path = str(file_path.relative_to(base_path))
+        # Ensure path uses forward slashes for matching
+        rel_path = rel_path.replace('\\', '/')
+    except ValueError:
+        return False
+        
+    return not exclude_spec.match_file(rel_path)
+
 def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> list[Path]:
     """
     Scans the target directory for Python files, respecting include/exclude patterns.
     """
-    config = load_config(config_path)
     base_path = Path(target_dir).resolve()
     
     if not base_path.exists() or not base_path.is_dir():
         return []
 
-    # Build pattern matchers
-    # Use 'gitignore' pattern factory as 'GitWildMatchPattern' is deprecated
-    exclude_spec = pathspec.PathSpec.from_lines(
-        'gitignore', 
-        config.get("exclude", [])
-    )
-    
-    # For 'include', we'll use rglob and then filter by exclude
-    # V1 simplification: we use the include patterns if they are glob-like,
-    # or just rglob("*.py") if include is broad.
-    
+    exclude_spec = get_exclude_spec(config_path)
     all_py_files = list(base_path.rglob("*.py"))
     valid_files = []
     
     for file_path in all_py_files:
-        # Calculate path relative to target_dir for matching
-        try:
-            rel_path = str(file_path.relative_to(base_path))
-        except ValueError:
-            # Handle cases where file is not under base_path (unlikely with rglob)
-            continue
-            
-        if not exclude_spec.match_file(rel_path):
+        if is_file_tracked(file_path, base_path, exclude_spec):
             valid_files.append(file_path)
             
     return sorted(valid_files)

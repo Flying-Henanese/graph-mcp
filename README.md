@@ -1,8 +1,7 @@
 # Archimedes
-现在项目还特别蠢，只是把脱水过后的程序给出来，并没有关系一说，回来我要做一个牛逼的
 **Archimedes** is a minimalist, high-performance local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server designed to serve as "X-ray glasses" for Large Language Models (LLMs). 
 
-It allows LLMs to instantly grasp the architecture of large Python codebases by dynamically stripping away implementation details and returning only the "skeleton"—function signatures, class definitions, and docstrings.
+It allows LLMs to instantly grasp the architecture of large Python codebases by dynamically stripping away implementation details and returning only the "skeleton"—function signatures, class definitions, and docstrings—along with a rich dependency graph.
 
 ## 🏗 Architecture
 
@@ -13,21 +12,26 @@ graph TD
     subgraph Archimedes
         Server --> Scanner[Scanner & Config]
         Server --> Extractor[AST Skeleton Extractor]
+        Server --> GraphBuilder[Dependency Graph Builder]
         
         Scanner -- "1. Filter Files" --> FS[(Local Filesystem)]
         FS -- "2. Raw Code" --> Extractor
+        FS -- "2. Imports/Exports" --> GraphBuilder
         Extractor -- "3. Stripped Skeleton" --> Server
+        GraphBuilder -- "3. Module Topology" --> Server
     end
     
-    Server -- "MCP Response (Skeleton)" --> Client
+    Server -- "MCP Response (Skeleton/Graph)" --> Client
 ```
 
 ## 🚀 Core Features
 
--   **Skeleton Extraction**: Uses Python's native `ast` (Abstract Syntax Tree) to surgically remove code bodies while preserving interfaces.
+-   **Skeleton Extraction**: Uses Python's native `ast` to surgically remove code bodies while preserving interfaces and docstrings.
+-   **Dependency Graphing**: Builds a structural map of the codebase using `rustworkx`, showing how modules interact through imports.
+-   **Real-time Memory Caching (Watchdog)**: Runs a background observer to detect file changes instantly. The codebase skeleton and structural hashes are kept in memory, dropping query latency to near zero.
+-   **Structural Hashing**: Calculates hashes based *only* on the skeleton, allowing clients to detect meaningful interface changes while ignoring logic-only updates.
 -   **Context Efficiency**: Dramatically reduces Token usage by stripping "the meat" (logic) and keeping "the bone" (structure).
 -   **Smart Scanning**: Git-aware file filtering via `archimedes.yaml` to exclude virtual environments, caches, and tests.
--   **Seamless Integration**: Built with `FastMCP` for easy use with `gemini-cli` and other MCP clients.
 
 ## 🛠 Tech Stack
 
@@ -35,6 +39,8 @@ graph TD
 -   **Package Manager**: `uv`
 -   **MCP Framework**: `mcp` (FastMCP)
 -   **Core Parser**: Native `ast`
+-   **Graph Engine**: `rustworkx`
+-   **File Monitoring**: `watchdog`
 -   **Filtering**: `pathspec` (gitignore-style matching)
 
 ## 📦 Installation
@@ -71,11 +77,17 @@ indexing:
 
 ## 🛠 MCP Tools Provided
 
-### 1. `get_codebase_skeleton(target_dir: str = ".")`
-Scans the specified directory and returns a concatenated string of all Python file skeletons. This is the "macro view" for the LLM.
+### 1. `get_dependency_graph()`
+Returns the project's macro architecture as a JSON Dependency Graph. Nodes represent modules (with their exports), and edges represent import relationships. Uses a **lazy-loading** strategy: the graph is only rebuilt if the underlying file structure has changed since the last call.
 
-### 2. `read_full_implementation(file_path: str)`
-Reads the full source code of a specific file. Use this after identifying a file of interest via the skeleton tool for deep-dive analysis or refactoring.
+### 2. `get_codebase_skeleton()`
+Returns a concatenated string of all Python file skeletons. Served directly from the **in-memory state in O(1) time**. Each file includes a structural hash, and the response contains a `GLOBAL_STRUCTURAL_HASH` for client caching.
+
+### 3. `check_cache_status()`
+Calculates the global structural hash of the codebase. Served directly from the **in-memory state in O(1) time**. Clients can use this to verify if their cached version of the skeleton is still valid without downloading the full content.
+
+### 4. `read_full_implementation(file_path: str)`
+Reads the full source code of a specific file. Use this after identifying a file of interest via the skeleton or graph tools.
 
 ## ⌨️ Local Usage
 
@@ -87,7 +99,7 @@ uv run python -m archimedes.server
 
 ## 🧪 Testing
 
-We maintain a robust test suite covering AST transformation, configuration parsing, and server logic.
+We maintain a robust test suite covering AST transformation, configuration parsing, graph building, and server logic.
 
 ```bash
 uv run pytest
@@ -95,8 +107,9 @@ uv run pytest
 
 ## 🗺 Roadmap
 
--   **V2.0**: Structural Hashing & SQLite integration for intelligent caching.
+-   **V2.1**: Advanced edge resolution (matching imports to specific functions/classes).
 -   **Gemini Context Caching**: Native integration with `cachedContents` API to achieve zero-token project loads.
+-   **Interactive Visualizer**: A lightweight web UI to browse the dependency graph.
 
 ## 📄 License
 

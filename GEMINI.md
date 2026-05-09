@@ -5,7 +5,7 @@ Archimedes is a minimalist, local **MCP Server** designed to act as "X-ray glass
 
 ## 2. Technical Stack & Standards
 - **Language**: Python 3.10+
-- **Dependency Management**: **`uv`** is mandatory for all package management, virtual environments, and script execution.
+- **Dependency Management**: **`uv`** is mandatory for all package management, virtual environments, and script execution. Dependencies **must** be logically grouped in `pyproject.toml`. Production-critical libraries go in `dependencies`, while development tools (e.g., `pytest`, `ruff`, `mypy`) must be isolated in a `dev` group (using `[dependency-groups]` or `[project.optional-dependencies]`).
 - **MCP Framework**: Anthropic's official `mcp` Python SDK.
 - **Core Parser**: Python's native `ast` module.
 - **Configuration**: `pyyaml` for `archimedes.yaml` management.
@@ -35,6 +35,7 @@ archimedes/
     - Every new tool or feature must be verified using `uv run`.
     - **Detailed Testing is Mandatory**: Use `pytest` for unit and integration tests. No code change is complete without corresponding test validation.
     - Automated tests must cover: AST stripping logic, config parsing, and MCP tool responses.
+- **Bilingual Documentation**: Any modification to `README.md` must be synchronized with `README_CN.md`, and vice-versa, to ensure consistency between English and Chinese documentation.
 
 ## 5. Testing Strategy
 - **Framework**: `pytest`

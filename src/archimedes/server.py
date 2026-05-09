@@ -1,18 +1,20 @@
 from mcp.server.fastmcp import FastMCP
 from pathlib import Path
 import os
-
-import hashlib
-from archimedes.config import scan_files
-from archimedes.skeleton import get_structural_code, calculate_structural_hash
-from archimedes.graph import build_project_graph, graph_to_json
 import json
+
+from archimedes.state import state
+from archimedes.watcher import start_watcher
+from archimedes.graph import build_project_graph, graph_to_json
 
 # Initialize MCP Server
 mcp = FastMCP("Archimedes")
 
+# Global reference to observer to keep it alive
+_observer = None
+
 @mcp.tool()
-def get_dependency_graph(target_dir: str = ".") -> str:
+def get_dependency_graph() -> str:
     """
     Returns the project's macro architecture as a JSON Dependency Graph.
     Nodes represent modules (with their exported classes/functions).
@@ -20,90 +22,67 @@ def get_dependency_graph(target_dir: str = ".") -> str:
     
     Use this to understand the high-level topology before reading skeletons.
     """
-    base_path = Path(os.getcwd())
-    target_path = (base_path / target_dir).resolve()
-    
-    if not target_path.exists() or not target_path.is_dir():
-        return f"Error: Directory '{target_dir}' does not exist."
+    if not state.is_initialized:
+        return "Error: Server state is not yet initialized."
 
-    files = scan_files(str(target_path))
-    if not files:
-        return "No Python files found to build graph."
-        
-    graph = build_project_graph(files, target_path)
-    json_data = graph_to_json(graph)
-    
-    # Return as formatted JSON string
-    return json.dumps(json_data, indent=2)
+    with state.lock:
+        if state.graph_needs_rebuild:
+            # Rebuild graph from cached files instead of disk
+            files = list(state.file_hashes.keys())
+            if not files:
+                return "No Python files found to build graph."
+                
+            graph = build_project_graph(files, state.base_path)
+            state.cached_graph_json = json.dumps(graph_to_json(graph), indent=2)
+            state.graph_needs_rebuild = False
+            
+        return state.cached_graph_json
 
 @mcp.tool()
-def check_cache_status(target_dir: str = ".") -> dict:
+def check_cache_status() -> dict:
     """
-    Calculates a global structural hash of the codebase to check if the cache is still valid.
-    Use this to avoid re-downloading the entire skeleton if nothing has changed.
+    Returns the current global structural hash of the codebase to check if the client cache is valid.
+    Reads directly from memory (O(1)), no disk scanning involved.
     
     Returns:
         A dictionary containing the global_hash and file_count.
     """
-    base_path = Path(os.getcwd())
-    target_path = (base_path / target_dir).resolve()
-    
-    if not target_path.exists() or not target_path.is_dir():
-        return {"error": f"Directory '{target_dir}' does not exist."}
+    if not state.is_initialized:
+        return {"error": "Server state is not yet initialized."}
 
-    files = scan_files(str(target_path))
-    hashes = []
-    
-    for file in files:
-        try:
-            content = file.read_text(encoding="utf-8")
-            skeleton = get_structural_code(content)
-            hashes.append(calculate_structural_hash(skeleton))
-        except Exception:
-            continue
-            
-    # Compute a global hash from all individual file hashes
-    global_hash = hashlib.sha256("".join(sorted(hashes)).encode("utf-8")).hexdigest() if hashes else ""
-    
-    return {
-        "global_structural_hash": global_hash,
-        "file_count": len(files),
-        "status": "ready"
-    }
+    with state.lock:
+        return {
+            "global_structural_hash": state.global_hash,
+            "file_count": len(state.file_hashes),
+            "status": "ready"
+        }
 
 @mcp.tool()
-def get_codebase_skeleton(target_dir: str = ".") -> str:
+def get_codebase_skeleton() -> str:
     """
-    Scans the target directory and returns the skeleton/interfaces of all Python files.
+    Returns the skeleton/interfaces of all tracked Python files directly from memory.
     Includes a 'Global-Hash' header for client-side caching.
     """
-    base_path = Path(os.getcwd())
-    target_path = (base_path / target_dir).resolve()
-    
-    if not target_path.exists() or not target_path.is_dir():
-        return f"Error: Directory '{target_dir}' does not exist or is not a directory."
-
-    files = scan_files(str(target_path))
-    if not files:
-        return f"No Python files found in '{target_dir}' after applying filters."
+    if not state.is_initialized:
+        return "Error: Server state is not yet initialized."
 
     result_parts = []
-    all_hashes = []
     
-    for file in files:
-        try:
-            content = file.read_text(encoding="utf-8")
-            skeleton = get_structural_code(content)
-            h = calculate_structural_hash(skeleton)
-            all_hashes.append(h)
+    with state.lock:
+        if not state.file_skeletons:
+            return "No Python files found after applying filters."
             
-            rel_display_path = file.relative_to(target_path)
-            result_parts.append(f"### File: {rel_display_path} (Hash: {h[:8]}) ###\n{skeleton}\n")
-        except Exception as e:
-            rel_display_path = file.relative_to(target_path) if target_path in file.parents else file.name
-            result_parts.append(f"### File: {rel_display_path} ###\n# [Error] {str(e)}\n")
+        for file_path, skeleton in sorted(state.file_skeletons.items()):
+            rel_display_path = file_path.relative_to(state.base_path)
+            h = state.file_hashes.get(file_path, "Error")
             
-    global_hash = hashlib.sha256("".join(sorted(all_hashes)).encode("utf-8")).hexdigest() if all_hashes else ""
+            if "Error" in skeleton:
+                result_parts.append(f"### File: {rel_display_path} ###\n{skeleton}\n")
+            else:
+                result_parts.append(f"### File: {rel_display_path} (Hash: {h[:8]}) ###\n{skeleton}\n")
+                
+        global_hash = state.global_hash
+
     header = f"GLOBAL_STRUCTURAL_HASH: {global_hash}\n"
     header += "=" * 40 + "\n"
     
@@ -112,7 +91,7 @@ def get_codebase_skeleton(target_dir: str = ".") -> str:
 @mcp.tool()
 def read_full_implementation(file_path: str) -> str:
     """
-    Reads the full source code of a specific file.
+    Reads the full source code of a specific file from disk.
     Use this after identifying a relevant file via 'get_codebase_skeleton'.
     
     Args:
@@ -130,7 +109,15 @@ def read_full_implementation(file_path: str) -> str:
         return f"Error reading file '{file_path}': {str(e)}"
 
 def main():
-    mcp.run()
+    global _observer
+    # Start the watchdog observer on the current working directory before running MCP
+    _observer = start_watcher(".")
+    try:
+        mcp.run()
+    finally:
+        if _observer:
+            _observer.stop()
+            _observer.join()
 
 if __name__ == "__main__":
     main()
