@@ -40,6 +40,8 @@ graph-mcp/
 ## Development Rules
 
 - Prefer descriptive names over generic names. When several values have the same shape, use prefixes such as `source_`, `target_`, `current_`, or `resolved_`.
+- Use snake_case for variable names and function names. Use PascalCase for class names.
+- Be sure to document your code with clear docstrings.
 - Prefer dataclasses or explicit classes for fixed internal schemas. Avoid raw dictionaries for core graph or state entities unless the value is deliberately JSON-like output.
 - Use strict type hints on function signatures, class attributes, and non-trivial local variables.
 - Keep file operations scoped to the monitored project root and respect `archimedes.yaml` include/exclude filters.

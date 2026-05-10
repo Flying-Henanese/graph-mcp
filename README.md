@@ -146,9 +146,22 @@ uv run ruff check .
 uv run pytest
 ```
 
+## 🔭 Vision: Multi-Granularity X-Ray (Progressive Disclosure)
+
+Archimedes is evolving to solve the "One-size-fits-all" context problem. Supplying an entire codebase skeleton is perfect for deep refactoring, but it can be overkill for high-level architectural queries (which causes unnecessary Token bloat). 
+
+To maximize Token ROI, our architecture embraces a **Multi-Granularity** "Zoom Lens" approach:
+-   **L1: System/Infrastructure (Macro)**: Parsing `docker-compose.yml` (and eventually K8s configs) to provide a bird's-eye view of microservices, ports, and external dependencies. *(Highest Priority)*
+-   **L2: Module Dependency (Mid-Macro)**: The current `rustworkx` import graph mapping file-to-file relationships.
+-   **L3: Interface Skeleton (Mid-Micro)**: The current AST-based extraction of class and function signatures.
+-   **L4: Deep Call Graph (Micro)**: Function-level internal call tracing. *(Lowest Priority: Best handled by the LLM natively using file reads on targeted files).*
+
+By prioritizing **L1 (System Layer)**, Archimedes will allow AI agents to instantly grasp the project's macro boundaries before diving into Python-specific modules.
+
 ## 🗺 Roadmap
 
 -   **V2.1**: Advanced edge resolution (matching imports to specific functions/classes).
+-   **V2.2**: L1 Infrastructure Awareness — Add support for parsing `docker-compose.yml` to extract top-level system architecture and service dependencies.
 -   **Multi-language Support (V3)**: Abstract the parser layer to support languages beyond Python (e.g., TypeScript, Go, Java) using language-specific AST visitors.
 -   **Provider Cache Adapters**: Optional integrations for provider-side caches such as Gemini `cachedContents` and OpenAI prompt caching.
 -   **Interactive Visualizer**: A lightweight web UI to browse the dependency graph.
