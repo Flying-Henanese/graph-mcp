@@ -12,6 +12,7 @@ def temp_project(tmp_path):
     src.mkdir()
     (src / "main.py").write_text("print('main')")
     (src / "utils.py").write_text("print('utils')")
+    (tmp_path / "root.py").write_text("print('root')")
 
     internal = src / "internal"
     internal.mkdir()
@@ -24,6 +25,10 @@ def temp_project(tmp_path):
     venv = tmp_path / "venv"
     venv.mkdir()
     (venv / "lib.py").write_text("print('lib')")
+
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    (scripts / "tool.py").write_text("print('tool')")
 
     config = {
         "indexing": {
@@ -53,6 +58,8 @@ def test_scan_files_with_excludes(temp_project):
     assert "test_main.py" not in file_names
     assert "lib.py" not in file_names
     assert "secret.py" not in file_names
+    assert "root.py" not in file_names
+    assert "tool.py" not in file_names
 
 def test_scan_files_no_config(tmp_path):
     # Should use defaults

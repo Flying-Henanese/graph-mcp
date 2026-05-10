@@ -12,7 +12,7 @@ from pathlib import Path
 from watchdog.events import FileSystemEvent, FileSystemEventHandler
 from watchdog.observers import Observer
 
-from archimedes.config import get_exclude_spec, is_file_tracked, scan_files
+from archimedes.config import get_exclude_spec, get_include_spec, is_file_tracked, scan_files
 from archimedes.skeleton import calculate_structural_hash, get_structural_code
 from archimedes.state import state
 
@@ -26,6 +26,7 @@ class ArchimedesEventHandler(FileSystemEventHandler):
     """
     def __init__(self, base_path: Path) -> None:
         self.base_path = base_path
+        self.include_spec = get_include_spec()
         self.exclude_spec = get_exclude_spec()
 
     def process_file(self, file_path: Path) -> None:
@@ -37,7 +38,7 @@ class ArchimedesEventHandler(FileSystemEventHandler):
             file_path: Absolute path to the file that triggered the event.
         """
         # Fast exit if the file shouldn't be tracked (e.g., non-Python or excluded)
-        if not is_file_tracked(file_path, self.base_path, self.exclude_spec):
+        if not is_file_tracked(file_path, self.base_path, self.include_spec, self.exclude_spec):
             return
 
         try:

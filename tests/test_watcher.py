@@ -112,6 +112,28 @@ def test_watcher_file_addition(temp_workspace):
         observer.stop()
         observer.join()
 
+def test_watcher_ignores_files_outside_include(temp_workspace):
+    """
+    Test that adding a Python file outside include patterns does not update state.
+    """
+    observer = start_watcher(".")
+
+    try:
+        with state.lock:
+            initial_count = len(state.file_hashes)
+
+        ignored_file = temp_workspace / "outside.py"
+        ignored_file.write_text("def ignored():\n    return None", encoding="utf-8")
+
+        time.sleep(0.5)
+
+        with state.lock:
+            assert len(state.file_hashes) == initial_count
+            assert ignored_file.resolve() not in state.file_hashes
+    finally:
+        observer.stop()
+        observer.join()
+
 def test_watcher_file_deletion(temp_workspace):
     """
     Test that deleting a tracked file removes it from state.

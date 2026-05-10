@@ -1,5 +1,5 @@
 # Archimedes
-**Archimedes** is a minimalist, high-performance local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server designed to serve as "X-ray glasses" for Large Language Models (LLMs). 
+**Archimedes** is a minimalist, high-performance local [Model Context Protocol (MCP)](https://modelcontextprotocol.io/) server designed to serve as "X-ray glasses" for Large Language Models (LLMs).
 
 It allows LLMs to instantly grasp the architecture of large Python codebases by dynamically stripping away implementation details and returning only the "skeleton"—function signatures, class definitions, and docstrings—along with a rich dependency graph.
 
@@ -7,7 +7,7 @@ It allows LLMs to instantly grasp the architecture of large Python codebases by 
 
 ```mermaid
 graph TD
-    Client[LLM Client / Gemini-CLI] -- "MCP Tool Call" --> Server[Archimedes MCP Server]
+    Client[LLM Client / Gemini CLI / Codex] -- "MCP Tool Call" --> Server[Archimedes MCP Server]
     
     subgraph Archimedes
         Server --> Scanner[Scanner & Config]
@@ -27,11 +27,11 @@ graph TD
 ## 🚀 Core Features
 
 -   **Skeleton Extraction**: Uses Python's native `ast` to surgically remove code bodies while preserving interfaces and docstrings.
--   **Dependency Graphing**: Builds a structural map of the codebase using `rustworkx`, showing how modules interact through imports.
+-   **Dependency Graphing**: Builds a structural map of the codebase using `rustworkx`, including absolute imports, relative imports, `src/`-layout package aliases, package `__init__.py` modules, and merged import edges.
 -   **Real-time Memory Caching (Watchdog)**: Runs a background observer to detect file changes instantly. The codebase skeleton and structural hashes are kept in memory, dropping query latency to near zero.
 -   **Structural Hashing**: Calculates hashes based *only* on the skeleton, allowing clients to detect meaningful interface changes while ignoring logic-only updates.
 -   **Context Efficiency**: Dramatically reduces Token usage by stripping "the meat" (logic) and keeping "the bone" (structure).
--   **Smart Scanning**: Git-aware file filtering via `archimedes.yaml` to exclude virtual environments, caches, and tests.
+-   **Configurable Scanning**: `archimedes.yaml` uses gitignore-style exclude patterns to skip virtual environments, caches, tests, and other noisy paths.
 
 ## 🛠 Tech Stack
 
@@ -48,9 +48,9 @@ graph TD
 Ensure you have [uv](https://github.com/astral-sh/uv) installed.
 
 ```bash
-# Clone the repository
-git clone https://github.com/your-username/archimedes.git
-cd archimedes
+# Clone this repository
+git clone https://github.com/Flying-Henanese/graph-mcp.git
+cd graph-mcp
 
 # Sync dependencies and create virtual environment
 uv sync
@@ -75,10 +75,12 @@ indexing:
     - ".git/**"
 ```
 
+Only Python files matching `include` patterns are indexed. Matching files are then filtered by `exclude` patterns.
+
 ## 🛠 MCP Tools Provided
 
 ### 1. `get_dependency_graph()`
-Returns the project's macro architecture as a JSON Dependency Graph. Nodes represent modules (with their exports), and edges represent import relationships. Uses a **lazy-loading** strategy: the graph is only rebuilt if the underlying file structure has changed since the last call.
+Returns the project's macro architecture as a JSON Dependency Graph. Nodes represent modules (with their exports), and edges represent import relationships. Uses a **lazy-loading** strategy: the graph is rebuilt when the cached structural state has changed; otherwise, the cached JSON is returned.
 
 ### 2. `get_codebase_skeleton()`
 Returns a concatenated string of all Python file skeletons. Served directly from the **in-memory state in O(1) time**. Each file includes a structural hash, and the response contains a `GLOBAL_STRUCTURAL_HASH` for client caching.
@@ -88,6 +90,41 @@ Calculates the global structural hash of the codebase. Served directly from the 
 
 ### 4. `read_full_implementation(file_path: str)`
 Reads the full source code of a specific file. Use this after identifying a file of interest via the skeleton or graph tools.
+
+### 5. `get_context_manifest()`
+Returns a provider-neutral manifest of cacheable context blocks. Clients can compare block hashes before deciding whether to fetch large context payloads.
+
+### 6. `get_context_block(block_id: str)`
+Returns a specific cacheable context block. The current block ids are `codebase_skeleton` and `dependency_graph`.
+
+## 🧠 Cache Model
+
+Archimedes currently implements caching inside the MCP server, plus cache-friendly metadata for LLM clients:
+
+-   On startup, `watchdog` scans the project, extracts skeletons, and stores skeletons and structural hashes in memory.
+-   On file creation, modification, or deletion, the in-memory `ProjectState` is updated and the dependency graph cache is marked dirty.
+-   `check_cache_status()` returns the current `GLOBAL_STRUCTURAL_HASH`, allowing clients such as Gemini CLI, Codex, or custom wrappers to decide whether their local skeleton cache is still valid.
+-   `get_context_manifest()` and `get_context_block()` expose the same context as stable, hash-addressed blocks for provider-neutral cache adapters.
+-   The structural hash is based on the skeleton, not the full implementation, so logic-only changes do not invalidate the skeleton cache.
+
+Archimedes does **not** currently create Gemini `cachedContents` entries or manage provider-side LLM cache IDs. Native provider cache integration is planned as future work.
+
+## 📊 Token Experiments
+
+The repository includes a small Gemini CLI A/B script for comparing Archimedes MCP context against direct repository reads:
+
+```bash
+# Configure Gemini CLI with the Archimedes MCP server, then run one A/B sample
+scripts/gemini_token_ab.sh --setup-mcp --runs 1
+
+# Use an already-configured MCP server
+scripts/gemini_token_ab.sh --runs 1
+
+# Pick a specific Gemini model
+MODEL=gemini-2.5-flash scripts/gemini_token_ab.sh --runs 1
+```
+
+The script writes raw Gemini output and a parsed summary under `.tmp/gemini-token-ab/`. Different Gemini CLI versions expose usage fields differently, so the raw logs are kept even when token fields cannot be parsed automatically.
 
 ## ⌨️ Local Usage
 
@@ -99,7 +136,7 @@ uv run python -m archimedes.server
 
 ## 🧪 Testing & Linting
 
-We maintain a robust test suite covering AST transformation, configuration parsing, graph building, and server logic, alongside strict code style checking with `ruff`.
+We maintain a robust test suite covering AST transformation, configuration parsing, graph building, server logic, context block metadata, and watcher behavior, alongside strict code style checking with `ruff`.
 
 ```bash
 # Run the linter
@@ -113,7 +150,7 @@ uv run pytest
 
 -   **V2.1**: Advanced edge resolution (matching imports to specific functions/classes).
 -   **Multi-language Support (V3)**: Abstract the parser layer to support languages beyond Python (e.g., TypeScript, Go, Java) using language-specific AST visitors.
--   **Gemini Context Caching**: Native integration with `cachedContents` API to achieve zero-token project loads.
+-   **Provider Cache Adapters**: Optional integrations for provider-side caches such as Gemini `cachedContents` and OpenAI prompt caching.
 -   **Interactive Visualizer**: A lightweight web UI to browse the dependency graph.
 
 ## 📄 License

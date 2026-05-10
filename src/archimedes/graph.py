@@ -29,6 +29,7 @@ class ImportInteraction:
     module: str
     entities: List[str]
     line_no: int
+    level: int = 0
 
 
 @dataclass
@@ -118,12 +119,80 @@ class DependencyVisitor(ast.NodeVisitor):
     # override visit_ImportFrom to capture specific entity imports from a module
     def visit_ImportFrom(self, node: ast.ImportFrom) -> None:
         """Captures specific entity imports from a module (e.g., `from os import path`)."""
-        if node.module:
-            entities = [alias.name for alias in node.names]
-            self.imports.append(
-                ImportInteraction(module=node.module, entities=entities, line_no=node.lineno)
+        entities = [alias.name for alias in node.names]
+        self.imports.append(
+            ImportInteraction(
+                module=node.module or "",
+                entities=entities,
+                line_no=node.lineno,
+                level=node.level,
             )
+        )
         self.generic_visit(node)
+
+
+def _module_name_from_path(file_path: Path, base_path: Path) -> str:
+    """Converts a project file path into a normalized Python module name."""
+    rel_path = file_path.relative_to(base_path)
+    module_name = str(rel_path.with_suffix("")).replace("/", ".").replace("\\", ".")
+    if module_name.endswith(".__init__"):
+        return module_name[: -len(".__init__")]
+    return module_name
+
+
+def _module_aliases(module_name: str) -> List[str]:
+    """Returns alternate import names for common src-layout packages."""
+    if module_name == "src":
+        return []
+
+    if module_name.startswith("src."):
+        return [module_name.removeprefix("src.")]
+
+    return []
+
+
+def _package_name(module_name: str, file_path: str) -> str:
+    """Returns the package namespace used to resolve relative imports."""
+    if file_path.endswith("__init__.py"):
+        return module_name
+    return module_name.rsplit(".", 1)[0] if "." in module_name else ""
+
+
+def _resolve_relative_module(source_package: str, imp: ImportInteraction) -> str:
+    """Converts an import interaction into an absolute module namespace candidate."""
+    if imp.level == 0:
+        return imp.module
+
+    package_parts = source_package.split(".") if source_package else []
+    parent_count = max(imp.level - 1, 0)
+    if parent_count:
+        package_parts = package_parts[:-parent_count]
+
+    if imp.module:
+        package_parts.extend(imp.module.split("."))
+
+    return ".".join(part for part in package_parts if part)
+
+
+def _resolve_import_target(
+    source_node: ModuleNode,
+    imp: ImportInteraction,
+    module_to_node_idx: Dict[str, int],
+) -> int | None:
+    """Resolves an import interaction to a local graph node index when possible."""
+    source_package = _package_name(source_node.id, source_node.file_path)
+    candidate = _resolve_relative_module(source_package, imp)
+
+    for entity in imp.entities:
+        entity_candidate = f"{candidate}.{entity}" if candidate else entity
+        if entity_candidate in module_to_node_idx:
+            return module_to_node_idx[entity_candidate]
+
+    if candidate in module_to_node_idx:
+        return module_to_node_idx[candidate]
+
+    return None
+
 
 def build_project_graph(files: List[Path], base_path: Path) -> rx.PyDiGraph:
     """
@@ -145,16 +214,13 @@ def build_project_graph(files: List[Path], base_path: Path) -> rx.PyDiGraph:
     graph = rx.PyDiGraph()
     # Mapping from Python module namespace (e.g., 'src.utils.math') to the rustworkx node index
     module_to_node_idx = {}
+    node_to_path: Dict[int, str] = {}
 
     # --- Pass 1: Pre-compute module names and create nodes ---
     for file_path in files:
         try:
-            # acquire relative path to the file from the base path
             rel_path = file_path.relative_to(base_path)
-            # Convert file path to Python module notation
-            # (e.g., src/engine/parser.py -> src.engine.parser)
-            # module_name is the unique identifier for the module in the whole graph
-            module_name = str(rel_path.with_suffix("")).replace("/", ".").replace("\\", ".")
+            module_name = _module_name_from_path(file_path, base_path)
 
             # Extract metadata via AST Visitor
             # read source code
@@ -176,11 +242,15 @@ def build_project_graph(files: List[Path], base_path: Path) -> rx.PyDiGraph:
             # add node to graph, with a incremental index as the node ID
             idx = graph.add_node(node)
             module_to_node_idx[module_name] = idx
+            for alias in _module_aliases(module_name):
+                module_to_node_idx.setdefault(alias, idx)
+            node_to_path[idx] = str(rel_path)
         except Exception:
             # Skip unparseable files or those unexpectedly outside base_path
             continue
 
     # --- Pass 2: Add Edges based on resolved imports ---
+    edge_interactions: Dict[tuple[int, int], List[ImportDetail]] = {}
     for node_idx in graph.node_indices(): # traverse all nodes in the graph
         current_node: ModuleNode = graph[node_idx]
         source_module = current_node.id
@@ -188,27 +258,29 @@ def build_project_graph(files: List[Path], base_path: Path) -> rx.PyDiGraph:
         # Iterate over the raw imports captured in Pass 1
         for imp in current_node.raw_imports:
             imp: ImportInteraction
-            # Attempt to match imported_module to our known local modules
-            # Note: This is a best-effort static resolution. Dynamic imports or complex
-            # relative imports might be missed in this MVP version.
-            target_idx = module_to_node_idx.get(imp.module)
+            target_idx = _resolve_import_target(current_node, imp, module_to_node_idx)
+            if target_idx is None:
+                continue
 
             # If a local target is found (and it's not a self-import), create an edge
-            if target_idx is not None and target_idx != node_idx:
-                edge = DependencyEdge(
-                    interactions=[ImportDetail(
+            if target_idx != node_idx:
+                edge_interactions.setdefault((node_idx, target_idx), []).append(
+                    ImportDetail(
                         caller=source_module,
-                        callee=imp.module,
+                        callee=graph[target_idx].id,
                         imported_entities=imp.entities,
                         line_no=imp.line_no
-                    )]
+                    )
                 )
-                # Add the directed edge. Rustworkx allows multi-edges, so we don't strictly
-                # need to check for pre-existing edges here unless we want to consolidate them.
-                graph.add_edge(node_idx, target_idx, edge)
 
         # Clean up raw_imports from node data as it's no longer needed for the final output
         current_node.raw_imports = []
+
+    for (source_idx, target_idx), interactions in sorted(
+        edge_interactions.items(),
+        key=lambda item: (node_to_path[item[0][0]], node_to_path[item[0][1]]),
+    ):
+        graph.add_edge(source_idx, target_idx, DependencyEdge(interactions=interactions))
 
     return graph
 

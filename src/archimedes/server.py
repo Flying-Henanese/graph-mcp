@@ -25,18 +25,28 @@ mcp = FastMCP("Archimedes")
 # Global reference to observer to keep the background thread alive
 _observer: Optional[BaseObserver] = None
 
-@mcp.tool()
-def get_dependency_graph() -> str:
-    """
-    Returns the project's macro architecture as a JSON Dependency Graph.
+CONTEXT_SCHEMA_VERSION = "1"
+CONTEXT_BLOCKS = (
+    {
+        "id": "codebase_skeleton",
+        "kind": "skeleton",
+        "mime_type": "text/plain",
+        "description": (
+            "All tracked Python files reduced to signatures, definitions, docstrings, "
+            "and structural metadata."
+        ),
+    },
+    {
+        "id": "dependency_graph",
+        "kind": "graph",
+        "mime_type": "application/json",
+        "description": "A JSON module dependency graph with exports and import edges.",
+    },
+)
 
-    Nodes represent modules (with their exported classes/functions).
-    Edges represent import dependencies between these modules.
 
-    This tool utilizes a lazy-loading strategy: it only rebuilds the graph
-    using rustworkx if the codebase structure has changed since the last call.
-    Otherwise, it returns the cached JSON string in O(1) time.
-    """
+def _build_dependency_graph_json() -> str:
+    """Returns the dependency graph JSON, rebuilding the cached graph when needed."""
     if not state.is_initialized:
         return "Error: Server state is not yet initialized."
 
@@ -46,7 +56,7 @@ def get_dependency_graph() -> str:
         cached_json = state.cached_graph_json
 
     if needs_rebuild:
-        # Rebuild graph from cached files instead of hitting the disk again
+        # Rebuild from the current tracked file set, then cache the serialized graph.
         with state.lock:
             files = list(state.file_hashes.keys())
 
@@ -54,42 +64,15 @@ def get_dependency_graph() -> str:
             return "No Python files found to build graph."
 
         graph = build_project_graph(files, state.base_path)
-        new_json = json.dumps(graph_to_json(graph), indent=2)
+        new_json = json.dumps(graph_to_json(graph), indent=2, sort_keys=True)
         state.update_graph(new_json)
         return new_json
 
     return cached_json
 
-@mcp.tool()
-def check_cache_status() -> Dict[str, Any]:
-    """
-    Returns the current global structural hash of the codebase.
 
-    Clients can use this tool to quickly verify if their locally cached codebase
-    skeleton is still valid. Reads directly from memory in O(1) time.
-
-    Returns:
-        A dictionary containing the global_structural_hash and file_count.
-    """
-    if not state.is_initialized:
-        return {"error": "Server state is not yet initialized."}
-
-    with state.lock:
-        return {
-            "global_structural_hash": state.global_hash,
-            "file_count": len(state.file_hashes),
-            "status": "ready"
-        }
-
-@mcp.tool()
-def get_codebase_skeleton() -> str:
-    """
-    Returns the structural interfaces (skeleton) of all tracked Python files.
-
-    Served directly from the actively monitored in-memory state in O(1) time,
-    eliminating the need for synchronous disk reads or AST parsing during the request.
-    Includes a 'GLOBAL_STRUCTURAL_HASH' header for client-side caching mechanisms.
-    """
+def _render_codebase_skeleton() -> str:
+    """Returns the cached codebase skeleton with its global structural hash header."""
     if not state.is_initialized:
         return "Error: Server state is not yet initialized."
 
@@ -117,6 +100,125 @@ def get_codebase_skeleton() -> str:
     header += "=" * 40 + "\n"
 
     return header + "\n".join(result_parts)
+
+
+def _context_block_hash(block_id: str) -> str:
+    """Returns the stable hash for a context block."""
+    with state.lock:
+        global_hash = state.global_hash
+
+    return f"{block_id}:{CONTEXT_SCHEMA_VERSION}:{global_hash}"
+
+
+@mcp.tool()
+def get_dependency_graph() -> str:
+    """
+    Returns the project's macro architecture as a JSON Dependency Graph.
+
+    Nodes represent modules (with their exported classes/functions).
+    Edges represent import dependencies between these modules.
+
+    This tool utilizes a lazy-loading strategy: it only rebuilds the graph
+    using rustworkx if the codebase structure has changed since the last call.
+    Otherwise, it returns the cached JSON string in O(1) time.
+    """
+    return _build_dependency_graph_json()
+
+
+@mcp.tool()
+def check_cache_status() -> Dict[str, Any]:
+    """
+    Returns the current global structural hash of the codebase.
+
+    Clients can use this tool to quickly verify if their locally cached codebase
+    skeleton is still valid. Reads directly from memory in O(1) time.
+
+    Returns:
+        A dictionary containing the global_structural_hash and file_count.
+    """
+    if not state.is_initialized:
+        return {"error": "Server state is not yet initialized."}
+
+    with state.lock:
+        return {
+            "global_structural_hash": state.global_hash,
+            "file_count": len(state.file_hashes),
+            "status": "ready"
+        }
+
+
+@mcp.tool()
+def get_codebase_skeleton() -> str:
+    """
+    Returns the structural interfaces (skeleton) of all tracked Python files.
+
+    Served directly from the actively monitored in-memory state in O(1) time,
+    eliminating the need for synchronous disk reads or AST parsing during the request.
+    Includes a 'GLOBAL_STRUCTURAL_HASH' header for client-side caching mechanisms.
+    """
+    return _render_codebase_skeleton()
+
+
+@mcp.tool()
+def get_context_manifest() -> Dict[str, Any]:
+    """
+    Returns a provider-neutral manifest of cacheable context blocks.
+
+    Clients can compare block hashes with their own local or provider-side caches
+    before deciding whether to fetch full context block contents.
+    """
+    if not state.is_initialized:
+        return {"error": "Server state is not yet initialized."}
+
+    with state.lock:
+        global_hash = state.global_hash
+        file_count = len(state.file_hashes)
+
+    return {
+        "schema_version": CONTEXT_SCHEMA_VERSION,
+        "global_structural_hash": global_hash,
+        "file_count": file_count,
+        "blocks": [
+            {
+                **block,
+                "hash": _context_block_hash(block["id"]),
+            }
+            for block in CONTEXT_BLOCKS
+        ],
+    }
+
+
+@mcp.tool()
+def get_context_block(block_id: str) -> Dict[str, Any]:
+    """
+    Returns a cacheable context block by id.
+
+    Supported block ids are `codebase_skeleton` and `dependency_graph`.
+    """
+    if not state.is_initialized:
+        return {"error": "Server state is not yet initialized."}
+
+    block = next((item for item in CONTEXT_BLOCKS if item["id"] == block_id), None)
+    if block is None:
+        return {
+            "error": f"Unknown context block '{block_id}'.",
+            "available_blocks": [item["id"] for item in CONTEXT_BLOCKS],
+        }
+
+    if block_id == "codebase_skeleton":
+        content = _render_codebase_skeleton()
+    elif block_id == "dependency_graph":
+        content = _build_dependency_graph_json()
+    else:
+        return {"error": f"Context block '{block_id}' is not implemented."}
+
+    return {
+        **block,
+        "schema_version": CONTEXT_SCHEMA_VERSION,
+        "hash": _context_block_hash(block_id),
+        "content": content,
+    }
+
 
 @mcp.tool()
 def read_full_implementation(file_path: str) -> str:

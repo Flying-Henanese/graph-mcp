@@ -43,6 +43,22 @@ def load_config(config_path: str = "archimedes.yaml") -> Dict[str, Any]:
     except Exception:
         return default_config
 
+def get_include_spec(config_path: str = "archimedes.yaml") -> pathspec.PathSpec:
+    """
+    Reads the configuration and compiles a pathspec matcher for the include patterns.
+
+    Args:
+        config_path: The path to the configuration file.
+
+    Returns:
+        A compiled `pathspec.PathSpec` object ready for file matching.
+    """
+    config: Dict[str, Any] = load_config(config_path)
+    return pathspec.PathSpec.from_lines(
+        'gitignore',
+        config.get("include") or ["**/*.py"]
+    )
+
 def get_exclude_spec(config_path: str = "archimedes.yaml") -> pathspec.PathSpec:
     """
     Reads the configuration and compiles a pathspec matcher for the exclude patterns.
@@ -62,17 +78,19 @@ def get_exclude_spec(config_path: str = "archimedes.yaml") -> pathspec.PathSpec:
 def is_file_tracked(
     file_path: Path,
     base_path: Path,
+    include_spec: Optional[pathspec.PathSpec] = None,
     exclude_spec: Optional[pathspec.PathSpec] = None
 ) -> bool:
     """
     Determines whether a specific file should be tracked and processed by Archimedes.
 
-    A file is tracked if it is a Python file (`.py`) and its relative path does not
-    match any of the exclude patterns defined in the configuration.
+    A file is tracked if it is a Python file (`.py`), its relative path matches the
+    include patterns, and it does not match any exclude pattern.
 
     Args:
         file_path: The absolute path of the file to check.
         base_path: The root project directory, used to calculate the relative path.
+        include_spec: An optional pre-compiled pathspec matcher. If not provided, it will be loaded.
         exclude_spec: An optional pre-compiled pathspec matcher. If not provided, it will be loaded.
 
     Returns:
@@ -80,9 +98,6 @@ def is_file_tracked(
     """
     if file_path.suffix != ".py":
         return False
-
-    if exclude_spec is None:
-        exclude_spec = get_exclude_spec()
 
     try:
         # Calculate the relative path to the file from the base path
@@ -93,7 +108,13 @@ def is_file_tracked(
         # File is not under the base path
         return False
 
-    return not exclude_spec.match_file(rel_path)
+    if include_spec is None:
+        include_spec = get_include_spec()
+
+    if exclude_spec is None:
+        exclude_spec = get_exclude_spec()
+
+    return include_spec.match_file(rel_path) and not exclude_spec.match_file(rel_path)
 
 def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> List[Path]:
     """
@@ -114,17 +135,14 @@ def scan_files(target_dir: str, config_path: str = "archimedes.yaml") -> List[Pa
     if not base_path.exists() or not base_path.is_dir():
         return []
 
+    include_spec = get_include_spec(config_path)
     exclude_spec = get_exclude_spec(config_path)
 
-    # Using rglob to find all python files.
-    # Note: For V1, the 'include' config is simplified to assume we want all .py files,
-    # and we rely primarily on 'exclude' rules to filter unwanted ones.
     all_py_files = list(base_path.rglob("*.py"))
     valid_files = []
 
     for file_path in all_py_files:
-        if is_file_tracked(file_path, base_path, exclude_spec):
+        if is_file_tracked(file_path, base_path, include_spec, exclude_spec):
             valid_files.append(file_path)
 
     return sorted(valid_files)
-
